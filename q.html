@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en" >
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Interactive USA Political Map Enhanced</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #111827;
+      --ink: #e5e7eb;
+      --muted: #94a3b8;
+      --border: rgba(255, 255, 255, 0.12);
+      --tooltip-bg: #0b1220;
+    }
+    html, body {
+      margin: 0; padding: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font: 16px/1.5 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Helvetica Neue, Arial;
+    }
+    .wrap {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 20px 16px 40px;
+    }
+    header {
+      margin-bottom: 16px;
+    }
+    header h1 {
+      font-size: 1.4rem;
+      margin: 0 0 6px;
+      font-weight: 700;
+      letter-spacing: 0.2px;
+    }
+    header p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px;
+      box-shadow:
+        0 10px 30px rgba(0, 0, 0, 0.35),
+        inset 0 1px 0 rgba(255, 255, 255, 0.03);
+      position: relative;
+    }
+    .map-container {
+      position: relative;
+      width: 100%;
+    }
+    svg {
+      width: 100%;
+      height: auto;
+      display: block;
+      border-radius: 8px;
+      background: linear-gradient(180deg, #0f172a 0%, #0a0f1e 100%);
+    }
+    .state {
+      stroke: rgba(255,255,255,0.9);
+      stroke-width: 0.6px;
+      cursor: pointer;
+      transition: filter 120ms ease, transform 120ms ease, stroke-width 120ms ease;
+    }
+    .state:hover {
+      filter: brightness(1.08) saturate(1.08);
+      stroke-width: 2.2px;
+      transform: translateY(-5px);
+      transition: transform 120ms ease, shadow 120ms ease;
+      
+    }
+    .borders {
+      fill: none;
+      stroke: rgba(255,255,255,0.6);
+      stroke-width: 0.8px;
+      pointer-events: none;
+    }
+    .tooltip {
+      position: absolute;
+      pointer-events: none;
+      background: var(--tooltip-bg);
+      color: var(--ink);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 15px 15px;
+      font-size: 0.92rem;
+      min-width: 140px;
+      max-width: 280px;
+      box-shadow: 0 12px 32px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.16);
+      opacity: 0;
+      transition: opacity 120ms ease, transform 120ms ease;
+      z-index: 5;
+      user-select: none;
+      transform-origin: bottom center;
+    }
+    .tooltip.visible {
+      opacity: 1;
+    }
+    .tooltip .name {
+      font-weight: 500;
+      font-size: 1rem;
+      margin-bottom: 6px;
+    }
+    .tooltip .capital {
+      font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Interactive USA Political Map</h1>
+      <p>Click a state for more details.</p>
+    </header>
+    <div class="panel map-container" id="map-container"></div>
+  </div>
+
+  <div class="tooltip" id="tooltip"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+  <script src="https://cdn.jsdelivr.net/npm/topojson-client@3"></script>
+  <script>
+    (function() {
+      const palette = ['#ff6b6b', '#ffd166', '#2ec4b6', '#5b5ee6', '#FD58CE'];
+      const container = d3.select('#map-container');
+      const tooltip = d3.select('#tooltip');
+      let lastTooltipId = null;
+
+      // Toolkit available only for these states (FIPS codes)
+      const toolkitStates = [
+        '01','02','04','05','06','08','09','10','11','12','13','15','16','17','18','19',
+        '20','21','22','23','24','25','26','27','28','29','30','31','32','33','34','35',
+        '36','37','38','39','40','41','42','44','45','46','47','48','49','50','51','53',
+        '54','55','56'
+      ];
+
+      // Map of state IDs (FIPS) to info (name and capital only)
+      const STATEINFO = {
+        "01": { name: "Alabama", abbr: "AL", capital: "Montgomery", population: 5108468 },
+      "02": { name: "Alaska", abbr: "AK", capital: "Juneau", population: 733583 },
+      "04": { name: "Arizona", abbr: "AZ", capital: "Phoenix", population: 7431344 },
+      "05": { name: "Arkansas", abbr: "AR", capital: "Little Rock", population: 3045637 },
+      "06": { name: "California", abbr: "CA", capital: "Sacramento", population: 38965193 },
+      "08": { name: "Colorado", abbr: "CO", capital: "Denver", population: 5877610 },
+      "09": { name: "Connecticut", abbr: "CT", capital: "Hartford", population: 3626205 },
+      "10": { name: "Delaware", abbr: "DE", capital: "Dover", population: 1031985 },
+      "11": { name: "District of Columbia", abbr: "DC", capital: "Washington", population: 678972 },
+      "12": { name: "Florida", abbr: "FL", capital: "Tallahassee", population: 22610076 },
+      "13": { name: "Georgia", abbr: "GA", capital: "Atlanta", population: 11029227 },
+      "15": { name: "Hawaii", abbr: "HI", capital: "Honolulu", population: 1435138 },
+      "16": { name: "Idaho", abbr: "ID", capital: "Boise", population: 1964652 },
+      "17": { name: "Illinois", abbr: "IL", capital: "Springfield", population: 12549689 },
+      "18": { name: "Indiana", abbr: "IN", capital: "Indianapolis", population: 6862199 },
+      "19": { name: "Iowa", abbr: "IA", capital: "Des Moines", population: 3207004 },
+      "20": { name: "Kansas", abbr: "KS", capital: "Topeka", population: 2941238 },
+      "21": { name: "Kentucky", abbr: "KY", capital: "Frankfort", population: 4512310 },
+      "22": { name: "Louisiana", abbr: "LA", capital: "Baton Rouge", population: 4573749 },
+      "23": { name: "Maine", abbr: "ME", capital: "Augusta", population: 1395722 },
+      "24": { name: "Maryland", abbr: "MD", capital: "Annapolis", population: 6180253 },
+      "25": { name: "Massachusetts", abbr: "MA", capital: "Boston", population: 7001399 },
+      "26": { name: "Michigan", abbr: "MI", capital: "Lansing", population: 10037261 },
+      "27": { name: "Minnesota", abbr: "MN", capital: "Saint Paul", population: 5737915 },
+      "28": { name: "Mississippi", abbr: "MS", capital: "Jackson", population: 2925201 },
+      "29": { name: "Missouri", abbr: "MO", capital: "Jefferson City", population: 6196156 },
+      "30": { name: "Montana", abbr: "MT", capital: "Helena", population: 1132837 },
+      "31": { name: "Nebraska", abbr: "NE", capital: "Lincoln", population: 1967923 },
+      "32": { name: "Nevada", abbr: "NV", capital: "Carson City", population: 3195313 },
+      "33": { name: "New Hampshire", abbr: "NH", capital: "Concord", population: 1402054 },
+      "34": { name: "New Jersey", abbr: "NJ", capital: "Trenton", population: 9288994 },
+      "35": { name: "New Mexico", abbr: "NM", capital: "Santa Fe", population: 2113344 },
+      "36": { name: "New York", abbr: "NY", capital: "Albany", population: 19571216 },
+      "37": { name: "North Carolina", abbr: "NC", capital: "Raleigh", population: 10835803 },
+      "38": { name: "North Dakota", abbr: "ND", capital: "Bismarck", population: 812955 },
+      "39": { name: "Ohio", abbr: "OH", capital: "Columbus", population: 11785935 },
+      "40": { name: "Oklahoma", abbr: "OK", capital: "Oklahoma City", population: 4053824 },
+      "41": { name: "Oregon", abbr: "OR", capital: "Salem", population: 4240137 },
+      "42": { name: "Pennsylvania", abbr: "PA", capital: "Harrisburg", population: 12972008 },
+      "44": { name: "Rhode Island", abbr: "RI", capital: "Providence", population: 1095962 },
+      "45": { name: "South Carolina", abbr: "SC", capital: "Columbia", population: 5373555 },
+      "46": { name: "South Dakota", abbr: "SD", capital: "Pierre", population: 909824 },
+      "47": { name: "Tennessee", abbr: "TN", capital: "Nashville", population: 7126489 },
+      "48": { name: "Texas", abbr: "TX", capital: "Austin", population: 30502942 },
+      "49": { name: "Utah", abbr: "UT", capital: "Salt Lake City", population: 3417734 },
+      "50": { name: "Vermont", abbr: "VT", capital: "Montpelier", population: 649094 },
+      "51": { name: "Virginia", abbr: "VA", capital: "Richmond", population: 8715698 },
+      "53": { name: "Washington", abbr: "WA", capital: "Olympia", population: 7812850 },
+      "54": { name: "West Virginia", abbr: "WV", capital: "Charleston", population: 1766727 },
+      "55": { name: "Wisconsin", abbr: "WI", capital: "Madison", population: 5949129 },
+      "56": { name: "Wyoming", abbr: "WY", capital: "Cheyenne", population: 581381 }
+    };
+
+      // Map of state IDs to custom links
+      const stateLinks = {
+        '02': 'https://en.wikipedia.org/wiki/Alaska',
+        '15': 'https://en.wikipedia.org/wiki/Hawaii',
+        // Add other links...
+      };
+
+      const width = 975;
+      const height = 610;
+
+      const projection = d3.geoAlbersUsa()
+        .scale(1300)
+        .translate([width / 2, height / 2]);
+
+      const path = d3.geoPath(projection);
+
+      const svg = container.append('svg')
+        .attr('viewBox', `0 0 ${width} ${height}`)
+        .attr('role', 'img')
+        .attr('aria-label', 'Interactive political map of the United States');
+
+      // Position tooltip above cursor & horizontally centered
+      function positionTooltip(event) {
+  const rect = container.node().getBoundingClientRect();
+  const tooltipNode = tooltip.node();
+  const x = event.clientX - rect.left - tooltipNode.offsetWidth / 300;
+  const y = event.clientY - rect.top - tooltipNode.offsetHeight + 90; // 1px above
+  tooltip.style('left', `${x}px`)
+         .style('top', `${y}px`);
+}
+
+      // Render tooltip content for toolkit states only
+      function renderTooltip(id) {
+        if (!toolkitStates.includes(id)) {
+          hideTooltip();
+          return;
+        }
+        if (lastTooltipId !== id) {
+          lastTooltipId = id;
+          const info = STATEINFO[id];
+          if (!info) return hideTooltip();
+          tooltip.html(`
+            <div class="name">${info.name}</div>
+            <div class="capital">Capital: ${info.capital}</div>
+          `);
+          tooltip.classed('visible', true);
+        }
+      }
+
+      function hideTooltip() {
+        lastTooltipId = null;
+        tooltip.classed('visible', false);
+      }
+
+      // Load US map data and draw
+      d3.json('https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json').then(us => {
+        const states = topojson.feature(us, us.objects.states).features;
+        const neighbors = topojson.neighbors(us.objects.states.geometries);
+        const colors = new Array(states.length).fill(-1);
+
+        // Assign fixed colors for AK and HI
+        function assignColor(i, d) {
+          const id = String(d.id).padStart(2, '0');
+          if (id === '02') return palette[1]; // Alaska
+          if (id === '15') return palette[2]; // Hawaii
+          if (id === '04') return palette[3]; // Arizona
+          return colors[i] === -1 ? palette[i % palette.length] : palette[colors[i]];
+        }
+
+        // Greedy four-coloring
+        function getNextColor(usedColors) {
+          for (let i = 0; i < palette.length; i++) {
+            if (!usedColors.has(i)) return i;
+          }
+          return 0;
+        }
+
+        neighbors.forEach((neighs, i) => {
+          if (colors[i] === -1) {
+            const used = new Set();
+            neighs.forEach(n => {
+              if (colors[n] !== -1) used.add(colors[n]);
+            });
+            colors[i] = getNextColor(used);
+          }
+        });
+
+        svg.selectAll('path.state')
+          .data(states)
+          .join('path')
+          .attr('class', 'state')
+          .attr('d', path)
+          .attr('fill', (d, i) => assignColor(i, d))
+          .on('mouseenter', function(event, d) {
+            renderTooltip(String(d.id).padStart(2, '0'));
+            positionTooltip(event);
+            d3.select(this).raise();
+          })
+          .on('mousemove', function(event) {
+            positionTooltip(event);
+          })
+          .on('mouseleave', function() {
+            hideTooltip();
+          })
+          .on('click', function(event, d) {
+            const id = String(d.id).padStart(2, '0');
+            const url = stateLinks[id];
+            if (url) window.open(url, '_blank', 'noopener');
+          });
+
+        svg.append('path')
+          .datum(topojson.mesh(us, us.objects.states, (a, b) => a !== b))
+          .attr('class', 'borders')
+          .attr('d', path);
+      });
+
+      document.addEventListener('click', e => {
+        if (!e.target.closest('.tooltip')) hideTooltip();
+      });
+    })();
+  </script>
+</body>
+</html>
